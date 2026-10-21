@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>寻宝大冒险 · 异步寻宝动画</title>
+<style>
+  :root {
+    --bg-0: #0b1020;
+    --bg-1: #151b34;
+    --gold: #ffcf5c;
+    --gold-deep: #e8a33d;
+    --ink: #e9edff;
+    --ink-dim: #9aa3c7;
+    --ok: #57e08a;
+    --warn: #ffb03a;
+    --fail: #ff6b6b;
+    --card: rgba(255, 255, 255, 0.05);
+    --card-brd: rgba(255, 255, 255, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(255, 207, 92, 0.12), transparent 60%),
+      radial-gradient(900px 500px at 90% 0%, rgba(88, 120, 255, 0.18), transparent 55%),
+      linear-gradient(160deg, var(--bg-1), var(--bg-0) 60%);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* 背景漂浮的火星光点 */
+  .stars { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; }
+  .stars i {
+    position: absolute; width: 3px; height: 3px; border-radius: 50%;
+    background: var(--gold); opacity: .5;
+    animation: float 12s linear infinite;
+  }
+  @keyframes float {
+    0%   { transform: translateY(20vh) scale(.6); opacity: 0; }
+    20%  { opacity: .8; }
+    100% { transform: translateY(-90vh) scale(1.1); opacity: 0; }
+  }
+
+  .wrap {
+    position: relative;
+    z-index: 1;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 20px 64px;
+  }
+
+  header { text-align: center; margin-bottom: 26px; }
+  h1 {
+    margin: 0 0 8px;
+    font-size: clamp(26px, 5vw, 42px);
+    letter-spacing: 2px;
+    background: linear-gradient(180deg, #fff6d8, var(--gold) 55%, var(--gold-deep));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 6px 30px rgba(255, 207, 92, 0.25);
+  }
+  .sub { color: var(--ink-dim); font-size: 14px; letter-spacing: 1px; }
+
+  /* 控制区 */
+  .controls { display: flex; gap: 14px; align-items: center; justify-content: center; margin: 22px 0 8px; flex-wrap: wrap; }
+  .btn {
+    border: 1px solid rgba(255, 207, 92, 0.5);
+    background: linear-gradient(180deg, rgba(255, 207, 92, 0.22), rgba(232, 163, 61, 0.14));
+    color: var(--gold);
+    font-size: 16px; font-weight: 600; letter-spacing: 1px;
+    padding: 12px 30px; border-radius: 999px; cursor: pointer;
+    transition: transform .15s ease, box-shadow .25s ease, opacity .2s;
+    box-shadow: 0 8px 24px rgba(232, 163, 61, 0.22);
+  }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(232, 163, 61, 0.35); }
+  .btn:active { transform: translateY(0); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  /* 进度条 */
+  .progress {
+    height: 8px; border-radius: 999px; background: rgba(255,255,255,0.08);
+    overflow: hidden; margin: 18px 0 26px; border: 1px solid var(--card-brd);
+  }
+  .progress > span {
+    display: block; height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--gold-deep), var(--gold));
+    box-shadow: 0 0 18px rgba(255, 207, 92, 0.6);
+    transition: width .5s ease;
+  }
+
+  /* 关卡时间轴 */
+  .stages {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 26px;
+  }
+  .stage {
+    position: relative;
+    border: 1px solid var(--card-brd);
+    background: var(--card);
+    border-radius: 14px;
+    padding: 14px 12px;
+    text-align: center;
+    transition: border-color .3s, background .3s, transform .3s, box-shadow .3s;
+    opacity: .55;
+  }
+  .stage .ico { font-size: 24px; display: block; margin-bottom: 6px; filter: grayscale(1); }
+  .stage .name { font-size: 13px; color: var(--ink-dim); line-height: 1.4; }
+  .stage .state { font-size: 11px; margin-top: 6px; color: var(--ink-dim); letter-spacing: .5px; }
+
+  .stage.active {
+    opacity: 1; transform: translateY(-3px);
+    border-color: rgba(255, 207, 92, 0.7);
+    background: rgba(255, 207, 92, 0.1);
+    box-shadow: 0 0 0 1px rgba(255,207,92,.35), 0 10px 30px rgba(255,207,92,.18);
+  }
+  .stage.active .ico { filter: none; animation: pulse 1.1s ease-in-out infinite; }
+  .stage.active .state { color: var(--gold); }
+  @keyframes pulse { 0%,100% { transform: scale(1);} 50% { transform: scale(1.18);} }
+
+  .stage.done { opacity: 1; border-color: rgba(87, 224, 138, 0.6); background: rgba(87, 224, 138, 0.08); }
+  .stage.done .ico { filter: none; }
+  .stage.done .state { color: var(--ok); }
+
+  .stage.failed { opacity: 1; border-color: rgba(255,107,107,.6); background: rgba(255,107,107,.1); }
+  .stage.failed .state { color: var(--fail); }
+  .stage.shake { animation: shake .4s ease; }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    25% { transform: translateX(-6px); }
+    75% { transform: translateX(6px); }
+  }
+
+  /* 日志面板 */
+  .log-panel {
+    border: 1px solid var(--card-brd);
+    background: rgba(8, 12, 26, 0.7);
+    border-radius: 16px;
+    padding: 18px;
+    min-height: 180px;
+    max-height: 320px;
+    overflow-y: auto;
+    box-shadow: inset 0 0 40px rgba(0,0,0,.5);
+  }
+  .log-panel h2 {
+    margin: 0 0 12px; font-size: 13px; letter-spacing: 2px;
+    color: var(--ink-dim); font-weight: 600; text-transform: uppercase;
+  }
+  #log { font-size: 15px; line-height: 1.9; }
+  #log .line { display: flex; gap: 8px; margin-bottom: 4px; animation: fadein .35s ease; }
+  #log .line .tag { flex: none; opacity: .9; }
+  #log .line.info  { color: var(--ink); }
+  #log .line.warn  { color: var(--warn); }
+  #log .line.fail  { color: var(--fail); }
+  #log .line.ok    { color: var(--ok); }
+  @keyframes fadein { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none;} }
+  .caret { display: inline-block; width: 8px; background: var(--gold); animation: blink .8s steps(1) infinite; margin-left: 2px; }
+  .caret.hide { display: none; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* 结局宝藏 */
+  .treasure {
+    margin-top: 26px; text-align: center; opacity: 0; transform: scale(.8);
+    transition: opacity .6s ease, transform .6s cubic-bezier(.2,.9,.3,1.4);
+    pointer-events: none;
+  }
+  .treasure.show { opacity: 1; transform: scale(1); }
+  .treasure .chest { font-size: 84px; display: inline-block; animation: shine 1.8s ease-in-out infinite; }
+  @keyframes shine { 0%,100% { filter: drop-shadow(0 0 10px rgba(255,207,92,.6)); } 50% { filter: drop-shadow(0 0 34px rgba(255,207,92,1)); } }
+  .treasure .txt {
+    margin-top: 8px; font-size: 20px; letter-spacing: 2px;
+    background: linear-gradient(180deg, #fff, var(--gold));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+
+  footer { text-align: center; margin-top: 30px; color: var(--ink-dim); font-size: 12px; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+  <div class="stars" id="stars"></div>
+
+  <div class="wrap">
+    <header>
+      <h1>寻宝大冒险</h1>
+      <div class="sub">Promise · async / await 异步寻宝之旅</div>
+    </header>
+
+    <div class="controls">
+      <button class="btn" id="startBtn">🚀 开始寻宝</button>
+    </div>
+
+    <div class="progress"><span id="bar"></span></div>
+
+    <section class="stages" id="stages"></section>
+
+    <div class="log-panel">
+      <h2>冒险日志</h2>
+      <div id="log"></div>
+    </div>
+
+    <div class="treasure" id="treasure">
+      <div class="chest">🏆</div>
+      <div class="txt">传说中的宝藏，属于勇敢的探索者!</div>
+    </div>
+
+    <footer>异步逻辑由 treasure.js 提供 · 全程 await 串行推进</footer>
+  </div>
+
+  <!-- 异步逻辑层 -->
+  <script src="treasure.js"></script>
+  <script>
+    // ---------- 背景星光 ----------
+    (function makeStars() {
+      const box = document.getElementById("stars");
+      for (let i = 0; i < 40; i++) {
+        const s = document.createElement("i");
+        s.style.left = Math.random() * 100 + "%";
+        s.style.animationDelay = (Math.random() * 12) + "s";
+        s.style.animationDuration = (8 + Math.random() * 8) + "s";
+        box.appendChild(s);
+      }
+    })();
+
+    const stagesEl = document.getElementById("stages");
+    const logEl = document.getElementById("log");
+    const barEl = document.getElementById("bar");
+    const startBtn = document.getElementById("startBtn");
+    const treasureEl = document.getElementById("treasure");
+
+    const cardMap = {};      // id -> 关卡卡片元素
+    let doneCount = 0;
+    let running = false;
+
+    // ---------- 渲染关卡卡片 ----------
+    STAGES.forEach((s) => {
+      const card = document.createElement("div");
+      card.className = "stage";
+      card.innerHTML =
+        '<span class="ico">' + s.icon + "</span>" +
+        '<div class="name">' + s.title + "</div>" +
+        '<div class="state">待出发</div>';
+      stagesEl.appendChild(card);
+      cardMap[s.id] = card;
+    });
+
+    // ---------- 打字机效果 ----------
+    function typeText(el, text, speed = 26) {
+      return new Promise((resolve) => {
+        let i = 0;
+        const caret = document.createElement("span");
+        caret.className = "caret";
+        el.appendChild(caret);
+        const timer = setInterval(() => {
+          if (i < text.length) {
+            caret.insertAdjacentText("beforebegin", text[i++]);
+            logEl.scrollTop = logEl.scrollHeight;
+          } else {
+            clearInterval(timer);
+            caret.remove();
+            resolve();
+          }
+        }, speed);
+      });
+    }
+
+    // ---------- 追加一行日志 ----------
+    function addLine(text, kind = "info", icon = "▸") {
+      const line = document.createElement("div");
+      line.className = "line " + kind;
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = icon;
+      const body = document.createElement("span");
+      line.appendChild(tag);
+      line.appendChild(body);
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+      return typeText(body, text, kind === "fail" ? 18 : 24);
+    }
+
+    function setState(id, cls, label) {
+      const card = cardMap[id];
+      if (!card) return;
+      card.classList.remove("active", "done", "failed");
+      if (cls) card.classList.add(cls);
+      card.querySelector(".state").textContent = label;
+    }
+
+    // ---------- 事件处理：把异步流程变成动画 ----------
+    async function handleEvent(e) {
+      if (e.type === "start") {
+        setState(e.id, "active", "进行中…");
+        return;
+      }
+      if (e.type === "done") {
+        setState(e.id, "done", "已完成 ✓");
+        doneCount++;
+        barEl.style.width = (doneCount / STAGES.length * 100) + "%";
+        await addLine(e.text, "ok", "✦");
+        return;
+      }
+      if (e.type === "retry") {
+        const card = cardMap[e.id];
+        if (card) {
+          card.classList.remove("shake");
+          void card.offsetWidth; // 触发重排以便重复播放动画
+          card.classList.add("shake");
+        }
+        await addLine(e.text, "warn", "⚠");
+        return;
+      }
+      if (e.type === "fail") {
+        setState(e.id, "failed", "任务失败 ✗");
+        await addLine(e.text, "fail", "✖");
+        return;
+      }
+      if (e.type === "finish") {
+        await addLine(e.text, "ok", "★");
+        treasureEl.classList.add("show");
+        startBtn.disabled = false;
+        startBtn.textContent = "🔁 再玩一次";
+        running = false;
+      }
+    }
+
+    // ---------- 开始按钮 ----------
+    startBtn.addEventListener("click", async () => {
+      if (running) return;
+      running = true;
+      startBtn.disabled = true;
+      startBtn.textContent = "寻宝中…";
+
+      // 重置界面
+      doneCount = 0;
+      barEl.style.width = "0%";
+      logEl.innerHTML = "";
+      treasureEl.classList.remove("show");
+      Object.keys(cardMap).forEach((id) => setState(id, "", "待出发"));
+
+      await addLine("冒险开始了，勇敢的探索者踏上了寻宝之路……", "info", "❖");
+
+      try {
+        // 只传入一个事件回调，页面负责把进展渲染成动画
+        await runTreasureHunt({ onEvent: handleEvent });
+      } catch (err) {
+        startBtn.disabled = false;
+        startBtn.textContent = "🔁 再试一次";
+        running = false;
+      }
+    });
+  </script>
+</body>
+</html>
